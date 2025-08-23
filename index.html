@@ -17,30 +17,6 @@
   </style>
 </head>
 <body class="min-h-full bg-gray-50 text-gray-900">
-  <!--
-  ====================
-  QUICK START (read me!)
-  ====================
-  1) Make a Firebase project at https://console.firebase.google.com
-     - Add a Web app. Copy the Web SDK config and paste into FIREBASE_CONFIG below.
-     - Enable Authentication > Sign-in method > Anonymous = ON.
-     - Create Firestore (Start in production mode).
-  2) Firestore rules (Console > Firestore > Rules): replace with the block in the
-     comment named "FIRESTORE SECURITY RULES" at the bottom of this file and publish.
-  3) Seed players (up to 5) in the Firestore collection "players":
-       Fields per player doc (example):
-         name:       "Alex"           (string)
-         uid:        null              (null)
-         codeHash:   <use Hash Helper below to generate from e.g. 4-digit code>
-         points:     0                 (number)
-         xp:         0                 (number)
-         streak:     0                 (number)
-         lastDoneAt: null              (timestamp or null)
-         habits:     []                (array)
-     TIP: Click the small "Setup → Hash Helper" in the footer here to compute codeHash safely offline.
-  4) Deploy: put this single file in a GitHub repo as index.html. Enable GitHub Pages (main branch / root).
-     Done. It works on any static host too (Vercel/Netlify/etc.).
-  -->
 
   <div class="max-w-6xl mx-auto p-4 md:p-8">
     <header class="flex flex-col md:flex-row md:items-center gap-3 md:gap-6 mb-6">
@@ -61,7 +37,7 @@
       <p class="text-sm text-gray-600 mb-4">(No email needed. Anonymous sign‑in.)</p>
       <div id="playerList" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3"></div>
       <div id="codeArea" class="mt-4 hidden">
-        <label class="block text-sm mb-1">Enter your 4–8 digit code</label>
+        <label class="block text-sm mb-1">Enter your 4—8 digit code</label>
         <div class="flex gap-2">
           <input id="codeInput" class="input" type="password" inputmode="numeric" placeholder="••••" />
           <button id="enterBtn" class="btn btn-primary">Enter</button>
@@ -159,18 +135,15 @@
     </div>
   </dialog>
 
-  <!-- ===================== -->
-  <!-- Firebase + App Logic  -->
-  <!-- ===================== -->
   <script type="module">
     // ====== 1) FILL THESE IN FROM THE FIREBASE CONSOLE ======
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyCk8YOp18DQ8HJHXTwAOyn25Yyh3nmn-k4",
-  authDomain: "final-habit.firebaseapp.com",
-  projectId: "final-habit",
-  storageBucket: "final-habit.firebasestorage.app",
-  messagingSenderId: "975128793137",
-  appId: "1:975128793137:web:ceb307d7cc5a5dc9da8510",
+      authDomain: "final-habit.firebaseapp.com",
+      projectId: "final-habit",
+      storageBucket: "final-habit.firebasestorage.app",
+      messagingSenderId: "975128793137",
+      appId: "1:975128793137:web:ceb307d7cc5a5dc9da8510",
     };
 
     // ====== 2) CONSTANTS ======
@@ -178,20 +151,19 @@
     const POINTS_PER_COMPLETION = 10;
 
     // ====== 3) IMPORT FIREBASE (CDN ESM) ======
-    // ====== 1) Firebase SDK v12.1.0 ======
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-import { 
-  getAuth, signInAnonymously, onAuthStateChanged 
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { 
-  getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot 
-} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+    import { 
+      getAuth, signInAnonymously, signOut, onAuthStateChanged 
+    } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+    import { 
+      getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, 
+      collection, query, orderBy, limit, getDocs
+    } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-
-// ====== 3) Init ======
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+    // ====== 4) Init Firebase ======
+    const app = initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
 
     // ====== 5) UTIL ======
     const $ = (sel) => document.querySelector(sel);
@@ -239,76 +211,111 @@ const db = getFirestore(app);
       currentUser = user;
       if (!user) {
         // Start anonymous sign-in immediately for a smooth flow
-        await signInAnonymously(auth);
+        try {
+          await signInAnonymously(auth);
+        } catch (error) {
+          console.error('Anonymous sign-in failed:', error);
+        }
         return;
       }
 
       // Load names for sign-in UI
-      renderNamePicker();
+      await renderNamePicker();
       // If we already claimed a player before on this device, try resuming
       const myId = localStorage.getItem('playerDocId');
       if (myId) {
         const ref = doc(db, 'players', myId);
-        const snap = await getDoc(ref);
-        if (snap.exists() && snap.data().uid === user.uid) {
-          currentPlayerRef = ref;
-          enterApp(snap.id, snap.data());
+        try {
+          const snap = await getDoc(ref);
+          if (snap.exists() && snap.data().uid === user.uid) {
+            currentPlayerRef = ref;
+            enterApp(snap.id, snap.data());
+          }
+        } catch (error) {
+          console.error('Error getting player doc:', error);
         }
       }
     });
 
     async function renderNamePicker() {
-      playerList.innerHTML = '';
-      const q = query(collection(db, 'players'), orderBy('name'));
-      const snaps = await getDocs(q);
-      snaps.forEach((docSnap) => {
-        const data = docSnap.data();
-        const btn = el('button', 'btn btn-ghost w-full');
-        btn.textContent = data.name || '(no name)';
-        btn.onclick = () => { selectedPlayerId = docSnap.id; codeArea.classList.remove('hidden'); codeInput.focus(); };
-        playerList.appendChild(btn);
-      });
+      try {
+        playerList.innerHTML = '';
+        const q = query(collection(db, 'players'), orderBy('name'));
+        const snaps = await getDocs(q);
+        
+        if (snaps.empty) {
+          playerList.innerHTML = '<div class="col-span-full text-center text-gray-500">No players found. Please seed your database first.</div>';
+          return;
+        }
+        
+        snaps.forEach((docSnap) => {
+          const data = docSnap.data();
+          const btn = el('button', 'btn btn-ghost w-full');
+          btn.textContent = data.name || '(no name)';
+          btn.onclick = () => { 
+            selectedPlayerId = docSnap.id; 
+            codeArea.classList.remove('hidden'); 
+            codeInput.focus(); 
+          };
+          playerList.appendChild(btn);
+        });
+      } catch (error) {
+        console.error('Error loading players:', error);
+        playerList.innerHTML = '<div class="col-span-full text-center text-red-500">Error loading players. Check console.</div>';
+      }
     }
 
     enterBtn.onclick = async () => {
-      codeError.classList.add('hidden');
-      const code = codeInput.value.trim();
-      if (!selectedPlayerId || !code) return;
-      const ref = doc(db, 'players', selectedPlayerId);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) return;
-      const data = snap.data();
+      try {
+        codeError.classList.add('hidden');
+        const code = codeInput.value.trim();
+        if (!selectedPlayerId || !code) return;
+        
+        const ref = doc(db, 'players', selectedPlayerId);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) return;
+        const data = snap.data();
 
-      const inputHash = await sha256Hex(code);
+        const inputHash = await sha256Hex(code);
 
-      if (!data.uid) {
-        // Claim this slot
-        if (inputHash !== data.codeHash) {
-          codeError.textContent = 'Wrong code for this name.';
+        if (!data.uid) {
+          // Claim this slot
+          if (inputHash !== data.codeHash) {
+            codeError.textContent = 'Wrong code for this name.';
+            codeError.classList.remove('hidden');
+            return;
+          }
+          await updateDoc(ref, { uid: currentUser.uid });
+        } else if (data.uid !== currentUser.uid) {
+          codeError.textContent = 'This name is already in use on another device/account.';
           codeError.classList.remove('hidden');
           return;
         }
-        await updateDoc(ref, { uid: currentUser.uid });
-      } else if (data.uid !== currentUser.uid) {
-        codeError.textContent = 'This name is already in use on another device/account.';
-        codeError.classList.remove('hidden');
-        return;
-      }
 
-      currentPlayerRef = ref;
-      localStorage.setItem('playerDocId', ref.id);
-      enterApp(ref.id, data);
+        currentPlayerRef = ref;
+        localStorage.setItem('playerDocId', ref.id);
+        enterApp(ref.id, { ...data, uid: currentUser.uid });
+      } catch (error) {
+        console.error('Sign-in error:', error);
+        codeError.textContent = 'Sign-in failed. Check console for details.';
+        codeError.classList.remove('hidden');
+      }
     };
 
     signOutBtn.onclick = async () => {
-      localStorage.removeItem('playerDocId');
-      await signOut(auth);
-      // Soft reset UI
-      appView.classList.add('hidden');
-      signinView.classList.remove('hidden');
-      selectedPlayerId = null;
-      codeArea.classList.add('hidden');
-      whoami.classList.add('hidden');
+      try {
+        localStorage.removeItem('playerDocId');
+        await signOut(auth);
+        // Soft reset UI
+        appView.classList.add('hidden');
+        signinView.classList.remove('hidden');
+        selectedPlayerId = null;
+        codeArea.classList.add('hidden');
+        whoami.classList.add('hidden');
+        signOutBtn.classList.add('hidden');
+      } catch (error) {
+        console.error('Sign-out error:', error);
+      }
     };
 
     // ====== 8) APP (habits + leaderboard) ======
@@ -348,48 +355,52 @@ const db = getFirestore(app);
 
     async function completeHabit(index, h) {
       if (!currentPlayerRef) return;
-      const snap = await getDoc(currentPlayerRef);
-      if (!snap.exists()) return;
-      const data = snap.data();
-      const habits = Array.isArray(data.habits) ? data.habits : [];
-      const now = Date.now();
+      try {
+        const snap = await getDoc(currentPlayerRef);
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const habits = Array.isArray(data.habits) ? data.habits : [];
+        const now = Date.now();
 
-      // Streak logic per habit
-      const last = h.lastDoneAt ? (h.lastDoneAt.toMillis ? h.lastDoneAt.toMillis() : h.lastDoneAt) : null;
-      const days = last ? daysBetween(last, now) : null;
-      let newStreak = (h.streak || 0);
-      let interval = 1;
-      if (h.schedule === 'daily') interval = 1;
-      else if (h.schedule === 'every2') interval = 2;
-      else if (h.schedule === 'custom') interval = Math.max(2, h.customIntervalDays||3);
+        // Streak logic per habit
+        const last = h.lastDoneAt ? (h.lastDoneAt.toMillis ? h.lastDoneAt.toMillis() : h.lastDoneAt) : null;
+        const days = last ? daysBetween(last, now) : null;
+        let newStreak = (h.streak || 0);
+        let interval = 1;
+        if (h.schedule === 'daily') interval = 1;
+        else if (h.schedule === 'every2') interval = 2;
+        else if (h.schedule === 'custom') interval = Math.max(2, h.customIntervalDays||3);
 
-      if (last === null) {
-        newStreak = 1;
-      } else if (days === 0) {
-        // already did today — ignore streak increment, but allow points once per day per habit
-        alert('Already completed this habit today. Come back tomorrow!');
-        return;
-      } else if (days >= 1 && days <= interval) {
-        newStreak = (h.streak || 0) + 1;
-      } else {
-        newStreak = 1; // reset
+        if (last === null) {
+          newStreak = 1;
+        } else if (days === 0) {
+          // already did today — ignore streak increment, but allow points once per day per habit
+          alert('Already completed this habit today. Come back tomorrow!');
+          return;
+        } else if (days >= 1 && days <= interval) {
+          newStreak = (h.streak || 0) + 1;
+        } else {
+          newStreak = 1; // reset
+        }
+
+        const updated = { ...h, lastDoneAt: new Date(now), streak: newStreak, totalCompletions: (h.totalCompletions||0) + 1 };
+        habits[index] = updated;
+
+        // Overall progress
+        const newPoints = (data.points||0) + POINTS_PER_COMPLETION;
+        const newXp = (data.xp||0) + POINTS_PER_COMPLETION;
+        const overallLast = new Date(now);
+
+        await updateDoc(currentPlayerRef, {
+          habits: habits,
+          points: newPoints,
+          xp: newXp,
+          streak: computeOverallStreak(habits),
+          lastDoneAt: overallLast,
+        });
+      } catch (error) {
+        console.error('Error completing habit:', error);
       }
-
-      const updated = { ...h, lastDoneAt: new Date(now), streak: newStreak, totalCompletions: (h.totalCompletions||0) + 1 };
-      habits[index] = updated;
-
-      // Overall progress
-      const newPoints = (data.points||0) + POINTS_PER_COMPLETION;
-      const newXp = (data.xp||0) + POINTS_PER_COMPLETION;
-      const overallLast = new Date(now);
-
-      await updateDoc(currentPlayerRef, {
-        habits: habits,
-        points: newPoints,
-        xp: newXp,
-        streak: computeOverallStreak(habits),
-        lastDoneAt: overallLast,
-      });
     }
 
     function computeOverallStreak(habits) {
@@ -399,30 +410,38 @@ const db = getFirestore(app);
 
     async function deleteHabit(index) {
       if (!confirm('Delete this habit?')) return;
-      const snap = await getDoc(currentPlayerRef);
-      if (!snap.exists()) return;
-      const data = snap.data();
-      const habits = Array.isArray(data.habits) ? data.habits : [];
-      habits.splice(index, 1);
-      await updateDoc(currentPlayerRef, { habits, streak: computeOverallStreak(habits) });
+      try {
+        const snap = await getDoc(currentPlayerRef);
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const habits = Array.isArray(data.habits) ? data.habits : [];
+        habits.splice(index, 1);
+        await updateDoc(currentPlayerRef, { habits, streak: computeOverallStreak(habits) });
+      } catch (error) {
+        console.error('Error deleting habit:', error);
+      }
     }
 
     addHabitBtn.onclick = async () => {
-      const title = newHabitTitle.value.trim();
-      let schedule = newHabitSchedule.value;
-      let customIntervalDays = parseInt(newHabitInterval.value, 10) || 3;
-      if (!title) return alert('Give your habit a name');
+      try {
+        const title = newHabitTitle.value.trim();
+        let schedule = newHabitSchedule.value;
+        let customIntervalDays = parseInt(newHabitInterval.value, 10) || 3;
+        if (!title) return alert('Give your habit a name');
 
-      const snap = await getDoc(currentPlayerRef);
-      const data = snap.data();
-      const habits = Array.isArray(data.habits) ? data.habits : [];
-      if (habits.length >= MAX_HABITS) return alert('You already have the maximum of 15 habits.');
+        const snap = await getDoc(currentPlayerRef);
+        const data = snap.data();
+        const habits = Array.isArray(data.habits) ? data.habits : [];
+        if (habits.length >= MAX_HABITS) return alert('You already have the maximum of 15 habits.');
 
-      const newHabit = { id: crypto.randomUUID(), title, schedule, customIntervalDays, lastDoneAt: null, streak: 0, totalCompletions: 0 };
-      habits.push(newHabit);
-      await updateDoc(currentPlayerRef, { habits });
+        const newHabit = { id: crypto.randomUUID(), title, schedule, customIntervalDays, lastDoneAt: null, streak: 0, totalCompletions: 0 };
+        habits.push(newHabit);
+        await updateDoc(currentPlayerRef, { habits });
 
-      newHabitTitle.value = '';
+        newHabitTitle.value = '';
+      } catch (error) {
+        console.error('Error adding habit:', error);
+      }
     };
 
     // Live UI binding for this player
@@ -446,24 +465,28 @@ const db = getFirestore(app);
     // Live leaderboard (top 5)
     const board = $('#board');
     function bindBoard() {
-      const qTop = query(collection(db, 'players'), orderBy('points', 'desc'), limit(5));
-      onSnapshot(qTop, (qs) => {
-        board.innerHTML = '';
-        let rank = 1;
-        qs.forEach((docSnap) => {
-          const p = docSnap.data();
-          const li = el('li','flex items-center justify-between p-2 rounded-xl bg-gray-50');
-          const left = el('div','flex items-center gap-3');
-          const r = el('div','w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-bold', String(rank));
-          const n = el('div','font-medium', p.name||'—');
-          left.append(r,n);
-          const right = el('div','text-sm text-gray-700');
-          right.textContent = `Streak ${p.streak||0} • ${p.points||0} pts`;
-          li.append(left,right);
-          board.appendChild(li);
-          rank++;
+      try {
+        const qTop = query(collection(db, 'players'), orderBy('points', 'desc'), limit(5));
+        onSnapshot(qTop, (qs) => {
+          board.innerHTML = '';
+          let rank = 1;
+          qs.forEach((docSnap) => {
+            const p = docSnap.data();
+            const li = el('li','flex items-center justify-between p-2 rounded-xl bg-gray-50');
+            const left = el('div','flex items-center gap-3');
+            const r = el('div','w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-bold', String(rank));
+            const n = el('div','font-medium', p.name||'—');
+            left.append(r,n);
+            const right = el('div','text-sm text-gray-700');
+            right.textContent = `Streak ${p.streak||0} • ${p.points||0} pts`;
+            li.append(left,right);
+            board.appendChild(li);
+            rank++;
+          });
         });
-      });
+      } catch (error) {
+        console.error('Error binding leaderboard:', error);
+      }
     }
 
     function enterApp(id, data) {
@@ -483,47 +506,5 @@ const db = getFirestore(app);
       $('#hashOut').textContent = code ? await sha256Hex(code) : '';
     };
   </script>
-
-  <!-- ============================ -->
-  <!-- FIRESTORE SECURITY RULES     -->
-  <!-- ============================ -->
-  <!--
-  Copy/paste this into Firestore Rules and PUBLISH
-
-  rules_version = '2';
-  service cloud.firestore {
-    match /databases/{database}/documents {
-      match /players/{playerId} {
-        // Public reads: leaderboard and names. Keep private data out of docs.
-        allow read: if true;
-
-        function isSignedIn() { return request.auth != null; }
-        function isOwner() { return isSignedIn() && resource.data.uid == request.auth.uid; }
-
-        // Create (optional) — usually you seed docs in the console.
-        allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-
-        // Update if: (a) the owner is editing their own data, OR (b) first-time claim.
-        allow update: if (
-          // Owner may update their own fields
-          isOwner()
-        ) || (
-          // First-time claim: doc has no uid yet, and the user proves knowledge of the codeHash
-          isSignedIn() &&
-          resource.data.uid == null &&
-          request.resource.data.uid == request.auth.uid &&
-          // codeHash must match and stay unchanged
-          request.resource.data.codeHash == resource.data.codeHash &&
-          request.resource.data.codeHash == resource.data.codeHash &&
-          // name must be unchanged
-          request.resource.data.name == resource.data.name
-        );
-
-        // Never allow deletes from clients
-        allow delete: if false;
-      }
-    }
-  }
-  -->
 </body>
 </html>
