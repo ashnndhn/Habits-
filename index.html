@@ -178,14 +178,20 @@
     const POINTS_PER_COMPLETION = 10;
 
     // ====== 3) IMPORT FIREBASE (CDN ESM) ======
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-    import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-    import { getFirestore, collection, doc, getDoc, getDocs, onSnapshot, query, orderBy, limit, updateDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+    // ====== 1) Firebase SDK v12.1.0 ======
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged 
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { 
+  getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot 
+} from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-    // ====== 4) INIT ======
-    const app = initializeApp(FIREBASE_CONFIG);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+
+// ====== 3) Init ======
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
     // ====== 5) UTIL ======
     const $ = (sel) => document.querySelector(sel);
