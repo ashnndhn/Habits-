@@ -107,6 +107,15 @@
             <div class="text-xs text-gray-500">Live</div>
           </div>
           <ol id="board" class="space-y-2"></ol>
+          
+          <!-- All Users' Habits -->
+          <div class="mt-6 border-t pt-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-lg font-medium">Community Habits</h3>
+              <div class="text-xs text-gray-500">What everyone's working on</div>
+            </div>
+            <div id="communityHabits" class="space-y-3 max-h-96 overflow-y-auto"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -430,17 +439,24 @@
           habitTitle: habit.title,
           newStreak,
           newPoints,
-          overallStreak
+          overallStreak,
+          currentUserUid: currentUser?.uid,
+          docUid: data.uid,
+          playerRef: currentPlayerRef.path
         });
 
         // Update Firestore
-        await updateDoc(currentPlayerRef, {
+        const updateData = {
           habits: habits,
           points: newPoints,
           xp: newXp,
           streak: overallStreak,
           lastDoneAt: new Date(now),
-        });
+        };
+        
+        console.log('Update data:', updateData);
+        
+        await updateDoc(currentPlayerRef, updateData);
         
         console.log('Habit completion saved successfully');
         
@@ -539,8 +555,10 @@
       });
     }
 
-    // Live leaderboard (top 5)
+    // Live leaderboard (top 5) and community habits
     const board = $('#board');
+    const communityHabits = $('#communityHabits');
+    
     function bindBoard() {
       try {
         const qTop = query(collection(db, 'players'), orderBy('points', 'desc'), limit(5));
@@ -565,6 +583,93 @@
         console.error('Error binding leaderboard:', error);
       }
     }
+    
+    function bindCommunityHabits() {
+      try {
+        const qAll = query(collection(db, 'players'), orderBy('name'));
+        onSnapshot(qAll, (qs) => {
+          communityHabits.innerHTML = '';
+          qs.forEach((docSnap) => {
+            const player = docSnap.data();
+            const habits = Array.isArray(player.habits) ? player.habits : [];
+            
+            if (habits.length === 0) return; // Skip players with no habits
+            
+            const playerSection = el('div', 'p-3 rounded-xl bg-gray-50');
+            
+            // Player header
+            const header = el('div', 'flex items-center gap-2 mb-2');
+            const avatar = el('div', 'w-6 h-6 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold');
+            avatar.textContent = (player.name || 'Unknown').charAt(0).toUpperCase();
+            const name = el('div', 'font-medium text-sm', player.name || 'Unknown');
+            const stats = el('div', 'text-xs text-gray-500 ml-auto');
+            stats.textContent = `${habits.length} habit${habits.length === 1 ? '' : 's'}`;
+            header.append(avatar, name, stats);
+            
+            // Habits list
+            const habitsList = el('div', 'space-y-1');
+            habits.forEach(habit => {
+              const habitRow = el('div', 'flex items-center justify-between text-xs');
+              
+              const habitInfo = el('div', 'flex-1');
+              habitInfo.textContent = habit.title || 'Untitled habit';
+              
+              const habitStats = el('div', 'text-gray-500 flex items-center gap-2');
+              
+              // Streak indicator
+              const streakBadge = el('span', 'px-1.5 py-0.5 rounded text-xs font-medium');
+              const streak = habit.streak || 0;
+              if (streak >= 7) {
+                streakBadge.className += ' bg-green-100 text-green-700';
+              } else if (streak >= 3) {
+                streakBadge.className += ' bg-yellow-100 text-yellow-700';
+              } else {
+                streakBadge.className += ' bg-gray-100 text-gray-600';
+              }
+              streakBadge.textContent = `${streak} day${streak === 1 ? '' : 's'}`;
+              
+              // Last done indicator
+              const lastDone = habit.lastDoneAt;
+              let lastDoneText = '';
+              if (lastDone) {
+                const lastDate = typeof lastDone.toDate === 'function' ? lastDone.toDate() : new Date(lastDone);
+                const today = new Date();
+                const diffDays = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 0) {
+                  lastDoneText = '✅ Today';
+                } else if (diffDays === 1) {
+                  lastDoneText = 'Yesterday';
+                } else if (diffDays <= 7) {
+                  lastDoneText = `${diffDays} days ago`;
+                } else {
+                  lastDoneText = 'Inactive';
+                }
+              } else {
+                lastDoneText = 'Never';
+              }
+              
+              const lastDoneSpan = el('span', 'text-xs');
+              lastDoneSpan.textContent = lastDoneText;
+              
+              habitStats.append(streakBadge, lastDoneSpan);
+              habitRow.append(habitInfo, habitStats);
+              habitsList.appendChild(habitRow);
+            });
+            
+            playerSection.append(header, habitsList);
+            communityHabits.appendChild(playerSection);
+          });
+          
+          if (communityHabits.children.length === 0) {
+            communityHabits.innerHTML = '<div class="text-center text-gray-500 text-sm py-4">No active habits yet</div>';
+          }
+        });
+      } catch (error) {
+        console.error('Error binding community habits:', error);
+        communityHabits.innerHTML = '<div class="text-center text-red-500 text-sm py-4">Error loading community habits</div>';
+      }
+    }
 
     function enterApp(id, data) {
       signinView.classList.add('hidden');
@@ -572,6 +677,7 @@
       currentPlayerRef = doc(db, 'players', id);
       bindPlayer(currentPlayerRef);
       bindBoard();
+      bindCommunityHabits();
     }
 
     // ====== 9) HASH HELPER UI ======
