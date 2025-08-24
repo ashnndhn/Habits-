@@ -169,10 +169,13 @@
       collection, query, orderBy, limit, getDocs
     } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
-    // ====== 4) Init Firebase ======
+    // ====== 4) Init Firebase with persistence ======
     const app = initializeApp(FIREBASE_CONFIG);
     const auth = getAuth(app);
     const db = getFirestore(app);
+
+    // Enable auth persistence
+    auth.setPersistence = auth.setPersistence || (() => Promise.resolve());
 
     // ====== 5) UTIL ======
     const $ = (sel) => document.querySelector(sel);
@@ -219,29 +222,53 @@
     onAuthStateChanged(auth, async (user) => {
       currentUser = user;
       if (!user) {
-        // Start anonymous sign-in immediately for a smooth flow
-        try {
-          await signInAnonymously(auth);
-        } catch (error) {
-          console.error('Anonymous sign-in failed:', error);
+        // Only sign in anonymously if we don't have a stored session
+        const storedPlayerId = localStorage.getItem('playerDocId');
+        const storedUserToken = localStorage.getItem('userAuthToken');
+        
+        if (!storedPlayerId || !storedUserToken) {
+          try {
+            await signInAnonymously(auth);
+          } catch (error) {
+            console.error('Anonymous sign-in failed:', error);
+          }
         }
         return;
       }
 
+      // Store the user token for session management
+      localStorage.setItem('userAuthToken', user.uid);
+
       // Load names for sign-in UI
       await renderNamePicker();
+      
       // If we already claimed a player before on this device, try resuming
       const myId = localStorage.getItem('playerDocId');
       if (myId) {
         const ref = doc(db, 'players', myId);
         try {
           const snap = await getDoc(ref);
-          if (snap.exists() && snap.data().uid === user.uid) {
-            currentPlayerRef = ref;
-            enterApp(snap.id, snap.data());
+          if (snap.exists()) {
+            const data = snap.data();
+            // Check if this player belongs to the current user OR is unclaimed
+            if (data.uid === user.uid || data.uid === null) {
+              // If unclaimed, claim it with current user
+              if (data.uid === null) {
+                await updateDoc(ref, { uid: user.uid });
+              }
+              currentPlayerRef = ref;
+              enterApp(snap.id, { ...data, uid: user.uid });
+            } else {
+              // This player belongs to someone else, clear local storage
+              localStorage.removeItem('playerDocId');
+            }
+          } else {
+            // Player doc doesn't exist anymore, clear local storage
+            localStorage.removeItem('playerDocId');
           }
         } catch (error) {
           console.error('Error getting player doc:', error);
+          localStorage.removeItem('playerDocId');
         }
       }
     });
@@ -288,21 +315,34 @@
         const inputHash = await sha256Hex(code);
 
         if (!data.uid) {
-          // Claim this slot
+          // Claim this slot - verify code first
           if (inputHash !== data.codeHash) {
             codeError.textContent = 'Wrong code for this name.';
             codeError.classList.remove('hidden');
             return;
           }
           await updateDoc(ref, { uid: currentUser.uid });
+          localStorage.setItem('playerDocId', ref.id);
+          localStorage.setItem('userAuthToken', currentUser.uid);
         } else if (data.uid !== currentUser.uid) {
-          codeError.textContent = 'This name is already in use on another device/account.';
-          codeError.classList.remove('hidden');
-          return;
+          // Check if this is the same browser session by comparing stored tokens
+          const storedToken = localStorage.getItem('userAuthToken');
+          const storedPlayerId = localStorage.getItem('playerDocId');
+          
+          if (storedToken && storedPlayerId === selectedPlayerId && inputHash === data.codeHash) {
+            // Same browser, same player, correct code - transfer ownership
+            await updateDoc(ref, { uid: currentUser.uid });
+            localStorage.setItem('userAuthToken', currentUser.uid);
+          } else {
+            codeError.textContent = 'This name is already in use on another device/account.';
+            codeError.classList.remove('hidden');
+            return;
+          }
         }
 
         currentPlayerRef = ref;
         localStorage.setItem('playerDocId', ref.id);
+        localStorage.setItem('userAuthToken', currentUser.uid);
         enterApp(ref.id, { ...data, uid: currentUser.uid });
       } catch (error) {
         console.error('Sign-in error:', error);
@@ -313,8 +353,12 @@
 
     signOutBtn.onclick = async () => {
       try {
+        // Clear all local storage
         localStorage.removeItem('playerDocId');
+        localStorage.removeItem('userAuthToken');
+        
         await signOut(auth);
+        
         // Soft reset UI
         appView.classList.add('hidden');
         signinView.classList.remove('hidden');
@@ -322,6 +366,15 @@
         codeArea.classList.add('hidden');
         whoami.classList.add('hidden');
         signOutBtn.classList.add('hidden');
+        
+        // Force a fresh anonymous sign-in
+        setTimeout(async () => {
+          try {
+            await signInAnonymously(auth);
+          } catch (error) {
+            console.error('Re-signin failed:', error);
+          }
+        }, 500);
       } catch (error) {
         console.error('Sign-out error:', error);
       }
